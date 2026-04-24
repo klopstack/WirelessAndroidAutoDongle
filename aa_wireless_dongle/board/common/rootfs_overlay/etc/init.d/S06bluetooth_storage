@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# Root filesystem is read-only; bluez needs a writable /var/lib/bluetooth.
+# Bind-mount persistent storage when /persist is available, else use tmpfs.
+#
+
+set +e
+
+case "$1" in
+	start)
+		if mountpoint -q /var/lib/bluetooth; then
+			exit 0
+		fi
+		if mountpoint -q /persist; then
+			mkdir -p /persist/bluetooth
+			if mount --bind /persist/bluetooth /var/lib/bluetooth; then
+				exit 0
+			fi
+		fi
+		mount -t tmpfs -o size=8m,mode=0755 tmpfs /var/lib/bluetooth
+		;;
+	stop)
+		if mountpoint -q /var/lib/bluetooth; then
+			umount /var/lib/bluetooth 2>/dev/null || true
+		fi
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		exit 1
+		;;
+esac
+
+exit 0

@@ -60,8 +60,21 @@ public:
 
         SendMessage(MessageId::WifiInfoResponse, &wifiInfoResponse);
 
-        ReadMessage();
-        ReadMessage();
+        // After WifiInfoResponse the phone may send several messages before WifiStartResponse (7):
+        // - WifiVersionRequest / WifiVersionResponse exchange (4, 5)
+        // - One or more WifiConnectStatus (6) while Wi‑Fi is still associating (see upstream
+        //   WirelessAndroidAutoDongle issue #349 — multiple status updates are normal).
+        // Read and discard until WifiStartResponse. A fixed second ReadMessage() would block
+        // forever when only (7) is sent, and would fail if (6) appears zero or many times.
+        while (true) {
+            MessageId postInfoId = ReadMessage();
+            if (postInfoId == MessageId::Invalid) {
+                return;
+            }
+            if (postInfoId == MessageId::WifiStartResponse) {
+                break;
+            }
+        }
     }
 
 private:
