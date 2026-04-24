@@ -30,6 +30,10 @@ public:
     WifiInfo getWifiInfo();
     ConnectionStrategy getConnectionStrategy();
 
+    // Optional: override the BlueZ adapter Alias / advertised name.
+    // If empty, the default "WirelessAADongle-<suffix>" / "AndroidAuto-Dongle-<suffix>" is used.
+    std::string getBluetoothName();
+
     std::string getUniqueSuffix();
 private:
     Config() = default;
@@ -37,6 +41,7 @@ private:
     int32_t getenv(std::string name, int32_t defaultValue);
     std::string getenv(std::string name, std::string defaultValue);
 
+    std::string getInterfaceIpv4Address(std::string interface);
     std::string getMacAddress(std::string interface);
 
     std::optional<ConnectionStrategy> connectionStrategy;

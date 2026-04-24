@@ -12,8 +12,13 @@ fi
 
 
 ## Setup Wifi password
-if [ -z "${AAWG_WIFI_PASSWORD}" ]; then
-	export AAWG_WIFI_PASSWORD="$(cat /dev/urandom | tr -dc 'A-Za-z0-9@#' | head -c 16)"
+## - STA mode: SSID/password must be explicitly configured (no defaults)
+## - AP mode: if password is not set, generate a random one for convenience
+AAWG_WIFI_MODE="${AAWG_WIFI_MODE:-sta}"
+if [ "${AAWG_WIFI_MODE}" = "ap" ]; then
+	if [ -z "${AAWG_WIFI_PASSWORD}" ]; then
+		export AAWG_WIFI_PASSWORD="$(cat /dev/urandom | tr -dc 'A-Za-z0-9@#' | head -c 16)"
+	fi
 fi
 
 set +o allexport

@@ -1,7 +1,11 @@
 #pragma once
 
+#include <future>
+#include <memory>
 #include <optional>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "bluetoothCommon.h"
 
@@ -9,6 +13,15 @@ class BluezAdapterProxy;
 class AAWirelessProfile;
 class HSPHSProfile;
 class BLEAdvertisement;
+
+struct BluetoothDeviceInfo {
+    std::string objectPath;   // e.g. /org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX
+    std::string address;      // e.g. XX:XX:XX:XX:XX:XX
+    std::string name;         // Friendly name (may be empty)
+    bool paired = false;
+    bool trusted = false;
+    bool connected = false;
+};
 
 class BluetoothHandler {
 public:
@@ -20,6 +33,11 @@ public:
 
     std::optional<std::thread> connectWithRetry();
     void stopConnectWithRetry();
+
+    // Control-plane helpers (used by local control socket / UI / button hooks)
+    std::vector<BluetoothDeviceInfo> listDevices();
+    bool switchToDevice(const std::string& selector);
+    void disconnectAll();
 
 private:
     BluetoothHandler() {};
@@ -33,6 +51,8 @@ private:
     void setPairable(bool pairable);
     void exportProfiles();
     void connectDevice();
+    bool connectDeviceByObjectPath(const std::string& objectPath);
+    void disconnectAllConnectedDevices();
 
     void startAdvertising();
     void stopAdvertising();
@@ -51,4 +71,7 @@ private:
     std::shared_ptr<BLEAdvertisement> m_leAdvertisement;
 
     std::string m_adapterAlias;
+
+    // If set, connect retry loop prioritizes this device.
+    std::optional<std::string> m_preferredDeviceObjectPath;
 };

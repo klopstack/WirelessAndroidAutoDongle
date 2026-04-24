@@ -2,6 +2,9 @@
 #include <cstdarg>
 #include <sstream>
 #include <fstream>
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <syslog.h>
 
 #include "common.h"
@@ -26,6 +29,40 @@ int32_t Config::getenv(std::string name, int32_t defaultValue) {
 std::string Config::getenv(std::string name, std::string defaultValue) {
     char* envValue = std::getenv(name.c_str());
     return envValue != nullptr ? envValue : defaultValue;
+}
+
+std::string Config::getBluetoothName() {
+    return getenv("AAWG_BLUETOOTH_NAME", "");
+}
+
+std::string Config::getInterfaceIpv4Address(std::string interface) {
+    struct ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0 || ifaddr == nullptr) {
+        return "";
+    }
+
+    std::string ip;
+    for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) {
+            continue;
+        }
+        if (ifa->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        if (interface != ifa->ifa_name) {
+            continue;
+        }
+
+        char buf[INET_ADDRSTRLEN] = {0};
+        auto* sa = reinterpret_cast<struct sockaddr_in*>(ifa->ifa_addr);
+        if (inet_ntop(AF_INET, &(sa->sin_addr), buf, sizeof(buf)) != nullptr) {
+            ip = buf;
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    return ip;
 }
 
 std::string Config::getMacAddress(std::string interface) {
@@ -55,13 +92,15 @@ std::string Config::getUniqueSuffix() {
 }
 
 WifiInfo Config::getWifiInfo() {
+    const std::string detectedIp = getInterfaceIpv4Address("wlan0");
+    const std::string defaultProxyIp = !detectedIp.empty() ? detectedIp : "10.0.0.1";
     return {
         getenv("AAWG_WIFI_SSID", "AAWirelessDongle"),
         getenv("AAWG_WIFI_PASSWORD", "ConnectAAWirelessDongle"),
         getenv("AAWG_WIFI_BSSID", getMacAddress("wlan0")),
         SecurityMode::WPA2_PERSONAL,
         AccessPointType::DYNAMIC,
-        getenv("AAWG_PROXY_IP_ADDRESS", "10.0.0.1"),
+        getenv("AAWG_PROXY_IP_ADDRESS", defaultProxyIp),
         getenv("AAWG_PROXY_PORT", 5288),
     };
 }

@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# Start aawgd-mqtt daemon (optional)
+#
+
+DAEMON="aawgd-mqtt"
+PIDFILE="/var/run/$DAEMON.pid"
+
+RETVAL=0
+
+case "$1" in
+	start)
+		if [ -z "$AAWG_CONF_SOURCED" ]; then
+			echo "Source /etc/aawgd.conf"
+			source /etc/aawgd.conf
+		fi
+
+		if [ -z "$AAWG_MQTT_ENABLE" ]; then
+			echo "AAWG_MQTT_ENABLE is not set. Skipping MQTT bridge."
+			exit 0
+		fi
+
+		printf "Starting $DAEMON: "
+		start-stop-daemon -S -b -q -m -p "$PIDFILE" -x "/usr/bin/$DAEMON"
+		RETVAL=$?
+		[ $RETVAL = 0 ] && echo "OK" || echo "FAIL"
+		;;
+	stop)
+		printf "Stopping $DAEMON: "
+		start-stop-daemon -K -q -p "$PIDFILE"
+		RETVAL=$?
+		[ $RETVAL = 0 ] && echo "OK" || echo "FAIL"
+		;;
+	restart)
+		$0 stop
+		$0 start
+		;;
+	*)
+		echo "Usage: $0 {start|stop}"
+		;;
+esac
+
+exit $RETVAL
+

@@ -16,6 +16,13 @@ case "$1" in
 
 		echo >> /var/run/hostapd.conf
 
+		# SSID (default if not set)
+		SSID="${AAWG_WIFI_SSID:-AAWirelessDongle}"
+		if [ "${SSID}" = "EDIT_THIS" ]; then
+			SSID="AAWirelessDongle"
+		fi
+		echo "ssid=${SSID}" >> /var/run/hostapd.conf
+
 		# Add Wifi password
 		if [ -n "${AAWG_WIFI_PASSWORD}" ]; then
 			echo "wpa_passphrase=${AAWG_WIFI_PASSWORD}" >> /var/run/hostapd.conf

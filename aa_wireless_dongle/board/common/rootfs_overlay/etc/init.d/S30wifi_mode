@@ -1,0 +1,86 @@
+#!/bin/sh
+#
+# Select wlan0 STA vs AP mode based on /etc/aawgd.conf
+#
+
+set -e
+
+case "$1" in
+	start)
+		if [ -z "$AAWG_CONF_SOURCED" ]; then
+			echo "Source /etc/aawgd.conf"
+			source /etc/aawgd.conf
+		fi
+
+		WIFI_MODE="${AAWG_WIFI_MODE:-sta}"
+
+		# Stop services that might keep wlan0 busy.
+		if [ -x /etc/init.d/S50dnsmasq ]; then /etc/init.d/S50dnsmasq stop || true; fi
+		if [ -x /etc/init.d/S49hostapd ]; then /etc/init.d/S49hostapd stop || true; fi
+		killall -q hostapd dnsmasq wpa_supplicant || true
+
+		ifdown wlan0 2>/dev/null || true
+
+		if [ "$WIFI_MODE" = "ap" ]; then
+			AP_IP="${AAWG_AP_IP_ADDRESS:-10.0.0.1}"
+			AP_MASK="${AAWG_AP_NETMASK:-255.255.255.0}"
+
+			echo "Configuring wlan0 for AP mode (${AP_IP}/${AP_MASK})"
+
+			cat > /etc/network/interfaces <<EOF
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet static
+  address ${AP_IP}
+  netmask ${AP_MASK}
+EOF
+
+			# In AP mode, wpa_supplicant config is unused; leave it as-is.
+		else
+			echo "Configuring wlan0 for STA mode"
+
+			# Generate wpa_supplicant.conf from aawgd.conf
+			if [ -z "${AAWG_WIFI_SSID}" ] || [ "${AAWG_WIFI_SSID}" = "EDIT_THIS" ]; then
+				echo "AAWG_WIFI_SSID must be set for STA mode (set it in /etc/aawgd.conf)"
+				exit 1
+			fi
+			if [ -z "${AAWG_WIFI_PASSWORD}" ] || [ "${AAWG_WIFI_PASSWORD}" = "EDIT_THIS" ]; then
+				echo "AAWG_WIFI_PASSWORD must be set for STA mode (set it in /etc/aawgd.conf)"
+				exit 1
+			fi
+
+			SSID="${AAWG_WIFI_SSID}"
+			PSK="${AAWG_WIFI_PASSWORD}"
+			COUNTRY="${AAWG_COUNTRY_CODE:-US}"
+
+			cat > /etc/wpa_supplicant.conf <<EOF
+ap_scan=1
+
+country=${COUNTRY}
+
+network={
+   ssid="${SSID}"
+   psk="${PSK}"
+}
+EOF
+
+			cat > /etc/network/interfaces <<EOF
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet dhcp
+  pre-up wpa_supplicant -D nl80211 -i wlan0 -c /etc/wpa_supplicant.conf -B
+  post-down killall -q wpa_supplicant
+EOF
+		fi
+		;;
+	*)
+		echo "Usage: $0 {start}"
+		exit 1
+esac
+
+exit $?
+

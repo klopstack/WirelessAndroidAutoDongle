@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <algorithm>
 
 #include "common.h"
 #include "bluetoothHandler.h"
@@ -185,36 +186,26 @@ void BluetoothHandler::connectDevice() {
     }
 
     if (!device_paths.size()) {
-        Logger::instance()->info("Did not find any connected bluetooth device\n");
+        Logger::instance()->info("Did not find any bluetooth devices\n");
         return;
     }
 
-    const bool isDongleMode = (Config::instance()->getConnectionStrategy() == ConnectionStrategy::DONGLE_MODE);
+    if (m_preferredDeviceObjectPath.has_value()) {
+        const std::string preferred = m_preferredDeviceObjectPath.value();
+        std::stable_sort(device_paths.begin(), device_paths.end(), [&](const std::string& a, const std::string& b) {
+            const bool aPref = (a == preferred);
+            const bool bPref = (b == preferred);
+            return aPref > bPref;
+        });
+    }
 
+    const bool isDongleMode = (Config::instance()->getConnectionStrategy() == ConnectionStrategy::DONGLE_MODE);
     Logger::instance()->info("Found %d bluetooth devices\n", device_paths.size());
 
     for (const std::string &device_path: device_paths) {
-        Logger::instance()->info("Trying to connect bluetooth device at path: %s\n", device_path.c_str());
-
-        std::shared_ptr<DBus::ObjectProxy> bluezDevice = m_connection->create_object_proxy(BLUEZ_BUS_NAME, device_path);
-        DBus::MethodProxy connectProfile = *(bluezDevice->create_method<void(std::string)>(INTERFACE_BLUEZ_DEVICE, "ConnectProfile"));
-        DBus::MethodProxy disconnect = *(bluezDevice->create_method<void()>(INTERFACE_BLUEZ_DEVICE, "Disconnect"));
-
-        std::shared_ptr<DBus::PropertyProxy<bool>> deviceConnected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
-
-        try {
-            if (deviceConnected) {
-                Logger::instance()->info("Bluetooth device already connected, disconnecting\n");
-                disconnect();
-            }
-            connectProfile(isDongleMode ? "" : HSP_AG_UUID);
-            Logger::instance()->info("Bluetooth connected to the device\n");
+        if (connectDeviceByObjectPath(device_path)) {
             if (!isDongleMode) {
                 return;
-            }
-        } catch (DBus::Error& e) {
-            if (!isDongleMode) {
-                Logger::instance()->info("Failed to connect device at path: %s\n", device_path.c_str());
             }
         }
     }
@@ -222,6 +213,152 @@ void BluetoothHandler::connectDevice() {
     if (!isDongleMode) {
         Logger::instance()->info("Failed to connect to any known bluetooth device\n");
     }
+}
+
+bool BluetoothHandler::connectDeviceByObjectPath(const std::string& objectPath) {
+    const bool isDongleMode = (Config::instance()->getConnectionStrategy() == ConnectionStrategy::DONGLE_MODE);
+    Logger::instance()->info("Trying to connect bluetooth device at path: %s\n", objectPath.c_str());
+
+    std::shared_ptr<DBus::ObjectProxy> bluezDevice = m_connection->create_object_proxy(BLUEZ_BUS_NAME, objectPath);
+    DBus::MethodProxy connectProfile = *(bluezDevice->create_method<void(std::string)>(INTERFACE_BLUEZ_DEVICE, "ConnectProfile"));
+    DBus::MethodProxy disconnect = *(bluezDevice->create_method<void()>(INTERFACE_BLUEZ_DEVICE, "Disconnect"));
+
+    std::shared_ptr<DBus::PropertyProxy<bool>> deviceConnected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
+
+    try {
+        if (deviceConnected && deviceConnected->get_value()) {
+            Logger::instance()->info("Bluetooth device already connected, disconnecting\n");
+            disconnect();
+        }
+        connectProfile(isDongleMode ? "" : HSP_AG_UUID);
+        Logger::instance()->info("Bluetooth connected to the device\n");
+        return true;
+    } catch (DBus::Error& e) {
+        if (!isDongleMode) {
+            Logger::instance()->info("Failed to connect device at path: %s\n", objectPath.c_str());
+        }
+        return false;
+    }
+}
+
+void BluetoothHandler::disconnectAllConnectedDevices() {
+    DBus::ManagedObjects objects = getBluezObjects();
+
+    for (auto const& [path, interfaces]: objects) {
+        auto deviceIt = interfaces.find(INTERFACE_BLUEZ_DEVICE);
+        if (deviceIt == interfaces.end()) {
+            continue;
+        }
+
+        try {
+            std::shared_ptr<DBus::ObjectProxy> bluezDevice = m_connection->create_object_proxy(BLUEZ_BUS_NAME, path);
+            DBus::MethodProxy disconnect = *(bluezDevice->create_method<void()>(INTERFACE_BLUEZ_DEVICE, "Disconnect"));
+            std::shared_ptr<DBus::PropertyProxy<bool>> deviceConnected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
+
+            if (deviceConnected && deviceConnected->get_value()) {
+                Logger::instance()->info("Disconnecting currently connected device at path: %s\n", path.c_str());
+                disconnect();
+            }
+        } catch (DBus::Error& e) {
+            // Best-effort.
+        }
+    }
+}
+
+std::vector<BluetoothDeviceInfo> BluetoothHandler::listDevices() {
+    std::vector<BluetoothDeviceInfo> devices;
+    if (!m_connection) {
+        return devices;
+    }
+
+    DBus::ManagedObjects objects = getBluezObjects();
+    for (auto const& [path, interfaces]: objects) {
+        auto deviceIt = interfaces.find(INTERFACE_BLUEZ_DEVICE);
+        if (deviceIt == interfaces.end()) {
+            continue;
+        }
+
+        BluetoothDeviceInfo info;
+        info.objectPath = path;
+
+        try {
+            std::shared_ptr<DBus::ObjectProxy> bluezDevice = m_connection->create_object_proxy(BLUEZ_BUS_NAME, path);
+            auto addr = bluezDevice->create_property<std::string>(INTERFACE_BLUEZ_DEVICE, "Address");
+            auto name = bluezDevice->create_property<std::string>(INTERFACE_BLUEZ_DEVICE, "Name");
+            auto paired = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Paired");
+            auto trusted = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Trusted");
+            auto connected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
+
+            if (addr) info.address = addr->get_value();
+            if (name) info.name = name->get_value();
+            if (paired) info.paired = paired->get_value();
+            if (trusted) info.trusted = trusted->get_value();
+            if (connected) info.connected = connected->get_value();
+        } catch (DBus::Error& e) {
+            // Skip unreadable device.
+        }
+
+        devices.push_back(info);
+    }
+
+    // Prefer paired devices first, then connected, then stable by path.
+    std::stable_sort(devices.begin(), devices.end(), [](const BluetoothDeviceInfo& a, const BluetoothDeviceInfo& b) {
+        if (a.paired != b.paired) return a.paired > b.paired;
+        if (a.connected != b.connected) return a.connected > b.connected;
+        return a.objectPath < b.objectPath;
+    });
+
+    return devices;
+}
+
+bool BluetoothHandler::switchToDevice(const std::string& selector) {
+    if (!m_connection) {
+        return false;
+    }
+
+    // Stop background retry loop to avoid concurrent DBus calls.
+    stopConnectWithRetry();
+
+    std::vector<BluetoothDeviceInfo> devices = listDevices();
+    auto matches = [&](const BluetoothDeviceInfo& d) {
+        if (selector.empty()) return false;
+        if (d.objectPath == selector) return true;
+        if (!d.address.empty() && d.address == selector) return true;
+        if (!d.name.empty() && d.name == selector) return true;
+
+        // Case-insensitive name match (best-effort)
+        std::string a = d.name, b = selector;
+        std::transform(a.begin(), a.end(), a.begin(), ::tolower);
+        std::transform(b.begin(), b.end(), b.begin(), ::tolower);
+        return !a.empty() && a == b;
+    };
+
+    auto it = std::find_if(devices.begin(), devices.end(), matches);
+    if (it == devices.end()) {
+        Logger::instance()->info("switchToDevice: no matching device for selector: %s\n", selector.c_str());
+        return false;
+    }
+
+    m_preferredDeviceObjectPath = it->objectPath;
+
+    // Disconnect existing connection(s) first to force handover.
+    disconnectAllConnectedDevices();
+
+    const bool ok = connectDeviceByObjectPath(it->objectPath);
+    if (!ok) {
+        Logger::instance()->info("switchToDevice: connect failed for %s (%s)\n", it->objectPath.c_str(), it->address.c_str());
+    }
+    return ok;
+}
+
+void BluetoothHandler::disconnectAll() {
+    if (!m_connection) {
+        return;
+    }
+
+    stopConnectWithRetry();
+    m_preferredDeviceObjectPath.reset();
+    disconnectAllConnectedDevices();
 }
 
 void BluetoothHandler::retryConnectLoop() {
@@ -249,9 +386,13 @@ void BluetoothHandler::init() {
     m_dispatcher = DBus::StandaloneDispatcher::create();
     m_connection = m_dispatcher->create_connection( DBus::BusType::SYSTEM );
 
-    std::string adapterAliasPrefix = (Config::instance()->getConnectionStrategy() == ConnectionStrategy::DONGLE_MODE) ? ADAPTER_ALIAS_DONGLE_PREFIX : ADAPTER_ALIAS_PREFIX;
-
-    m_adapterAlias = adapterAliasPrefix + Config::instance()->getUniqueSuffix();
+    const std::string configuredBluetoothName = Config::instance()->getBluetoothName();
+    if (!configuredBluetoothName.empty()) {
+        m_adapterAlias = configuredBluetoothName;
+    } else {
+        std::string adapterAliasPrefix = (Config::instance()->getConnectionStrategy() == ConnectionStrategy::DONGLE_MODE) ? ADAPTER_ALIAS_DONGLE_PREFIX : ADAPTER_ALIAS_PREFIX;
+        m_adapterAlias = adapterAliasPrefix + Config::instance()->getUniqueSuffix();
+    }
 
     initAdapter();
     exportProfiles();

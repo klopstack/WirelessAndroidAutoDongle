@@ -3,7 +3,8 @@ services:
     build: .
     image: aawg-buildroot
     volumes:
-      - .:/app
+      # Fedora/RHEL with SELinux: label bind mount for container access
+      - .:/app:Z
       - dl:/app/buildroot/dl
       - output:/app/buildroot/output
     working_dir: /app/buildroot

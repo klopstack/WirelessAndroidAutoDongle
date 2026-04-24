@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "bluetoothHandler.h"
+#include "controlSocket.h"
 #include "proxyHandler.h"
 #include "uevent.h"
 #include "usb.h"
@@ -14,6 +15,7 @@ int main(void) {
     std::optional<std::thread> ueventThread =  UeventMonitor::instance().start();
     UsbManager::instance().init();
     BluetoothHandler::instance().init();
+    ControlSocketServer::instance().start();
 
     ConnectionStrategy connectionStrategy = Config::instance()->getConnectionStrategy();
     if (connectionStrategy == ConnectionStrategy::DONGLE_MODE) {

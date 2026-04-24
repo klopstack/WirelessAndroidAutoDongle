@@ -4,5 +4,6 @@ config BR2_PACKAGE_AAWG
 	depends on BR2_TOOLCHAIN_HAS_THREADS
 	select BR2_PACKAGE_DBUS_CXX_CUSTOM
 	select BR2_PACKAGE_PROTOBUF
+	select BR2_PACKAGE_MOSQUITTO
 	help
 	  Android Auto Wireless Gateway Daemon
