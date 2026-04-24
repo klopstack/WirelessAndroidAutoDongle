@@ -3,7 +3,9 @@
 # OTA A/B boot-state + rollback handling
 #
 
-set -e
+# This script must never block boot if /boot or /persist
+# are not yet mounted for any reason.
+set +e
 
 OTA_DIR="/persist/ota"
 CMDLINE_FILE="/boot/cmdline.txt"
@@ -19,10 +21,12 @@ get_root_dev() {
 }
 
 remount_boot_rw() {
+	mountpoint -q /boot || return 1
 	mount -o remount,rw /boot
 }
 
 remount_boot_ro() {
+	mountpoint -q /boot || return 0
 	mount -o remount,ro /boot
 }
 
@@ -53,6 +57,8 @@ set_cmdline_root() {
 
 case "$1" in
 	start)
+		# If /persist isn't mounted yet, skip (don't create state on tmpfs).
+		mountpoint -q /persist || exit 0
 		mkdir -p "$OTA_DIR"
 
 		PENDING_FILE="$OTA_DIR/upgrade_pending"

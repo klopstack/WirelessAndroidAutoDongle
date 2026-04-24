@@ -3,7 +3,8 @@
 # OTA A/B confirmation (clears pending after successful boot)
 #
 
-set -e
+# Never block boot if /persist is unavailable.
+set +e
 
 OTA_DIR="/persist/ota"
 
@@ -18,6 +19,7 @@ get_root_dev() {
 
 case "$1" in
 	start)
+		mountpoint -q /persist || exit 0
 		PENDING_FILE="$OTA_DIR/upgrade_pending"
 		TARGET_FILE="$OTA_DIR/pending_target_root"
 		BOOTCOUNT_FILE="$OTA_DIR/bootcount"
