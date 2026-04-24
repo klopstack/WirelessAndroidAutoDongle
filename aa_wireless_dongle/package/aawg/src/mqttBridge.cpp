@@ -95,14 +95,17 @@ static std::optional<std::string> parseCommandLine(const std::string& payload) {
     // Supported:
     //   "disconnect"
     //   "switch <selector>"
+    //   "ota <url>"
     //   {"cmd":"disconnect"}
     //   {"cmd":"switch","selector":"..."}
+    //   {"cmd":"ota","url":"..."}
     std::string s = payload;
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
     while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(s.begin());
 
     if (s == "disconnect") return std::string("DISCONNECT");
     if (s.rfind("switch ", 0) == 0) return std::string("SWITCH ") + s.substr(strlen("switch "));
+    if (s.rfind("ota ", 0) == 0) return std::string("OTA ") + s.substr(strlen("ota "));
 
     // Super-minimal JSON parsing (no deps). Good enough for controlled payloads.
     if (s.find("\"cmd\"") != std::string::npos && s.find("disconnect") != std::string::npos) {
@@ -127,6 +130,24 @@ static std::optional<std::string> parseCommandLine(const std::string& payload) {
         return std::string("SWITCH ") + sel;
     }
 
+    if (s.find("\"cmd\"") != std::string::npos && s.find("ota") != std::string::npos) {
+        auto pos = s.find("\"url\"");
+        if (pos == std::string::npos) return std::nullopt;
+        pos = s.find(':', pos);
+        if (pos == std::string::npos) return std::nullopt;
+        pos++;
+        while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t')) pos++;
+        if (pos >= s.size() || s[pos] != '"') return std::nullopt;
+        pos++;
+        std::string url;
+        while (pos < s.size() && s[pos] != '"') {
+            url.push_back(s[pos]);
+            pos++;
+        }
+        if (url.empty()) return std::nullopt;
+        return std::string("OTA ") + url;
+    }
+
     return std::nullopt;
 }
 
@@ -145,8 +166,19 @@ static void onMessage(struct mosquitto* m, void* obj, const struct mosquitto_mes
         return;
     }
 
+    const std::string c = cmd.value();
+    if (c.rfind("OTA ", 0) == 0) {
+        // Run OTA helper asynchronously; don't block MQTT callback thread.
+        const std::string url = c.substr(strlen("OTA "));
+        std::thread([url]() {
+            std::string command = "/usr/bin/aawg-ota-apply '" + url + "'";
+            (void)std::system(command.c_str());
+        }).detach();
+        return;
+    }
+
     std::string resp;
-    unixSockRequest(cmd.value(), resp);
+    unixSockRequest(c, resp);
 }
 
 int main(int argc, char** argv) {

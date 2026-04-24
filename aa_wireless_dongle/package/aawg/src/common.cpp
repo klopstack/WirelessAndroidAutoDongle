@@ -10,6 +10,16 @@
 #include "common.h"
 #include "proto/WifiInfoResponse.pb.h"
 
+#ifndef AAWG_VERSION_STR
+#define AAWG_VERSION_STR "dev"
+#endif
+#ifndef AAWG_GIT_SHA
+#define AAWG_GIT_SHA "unknown"
+#endif
+#ifndef AAWG_BUILD_TIME_UTC
+#define AAWG_BUILD_TIME_UTC "unknown"
+#endif
+
 #pragma region Config
 /*static*/ Config* Config::instance() {
     static Config s_instance;
@@ -150,3 +160,11 @@ void Logger::info(const char *format, ...) {
     va_end(args);
 }
 #pragma endregion Logger
+
+BuildInfo getBuildInfo() {
+    BuildInfo i;
+    i.version = AAWG_VERSION_STR;
+    i.gitSha = AAWG_GIT_SHA;
+    i.buildTimeUtc = AAWG_BUILD_TIME_UTC;
+    return i;
+}

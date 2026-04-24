@@ -1,0 +1,109 @@
+#!/bin/sh
+#
+# A/B rootfs OTA installer.
+# Invoked by aawgd-mqtt:  aawg-ota-apply <https_url_to_swu>
+#
+
+set -e
+
+URL="${1:-}"
+if [ -z "$URL" ]; then
+	echo "usage: aawg-ota-apply <url>"
+	exit 2
+fi
+
+OTA_DIR="/persist/ota"
+UPDATE_FILE="$OTA_DIR/update.swu"
+CMDLINE_FILE="/boot/cmdline.txt"
+PUBKEY="/etc/swupdate/public.pem"
+
+mkdir -p "$OTA_DIR"
+
+get_root_dev() {
+	for x in $(cat /proc/cmdline); do
+		case "$x" in
+			root=*) echo "${x#root=}" ; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+remount_boot_rw() {
+	mount -o remount,rw /boot
+}
+
+remount_boot_ro() {
+	mount -o remount,ro /boot
+}
+
+set_cmdline_root() {
+	target_root="$1"
+
+	remount_boot_rw
+	cur="$(cat "$CMDLINE_FILE")"
+	new=""
+	for t in $cur; do
+		case "$t" in
+			root=*) new="$new root=$target_root" ;;
+			*) new="$new $t" ;;
+		esac
+	done
+	new="${new# }"
+	printf "%s\n" "$new" > "$CMDLINE_FILE"
+	sync
+	remount_boot_ro
+}
+
+current_root="$(get_root_dev)"
+case "$current_root" in
+	/dev/mmcblk0p2) target_root="/dev/mmcblk0p3" ;;
+	/dev/mmcblk0p3) target_root="/dev/mmcblk0p2" ;;
+	*)
+		echo "OTA: unsupported current root: $current_root"
+		exit 3
+		;;
+esac
+
+echo "OTA: current=$current_root target=$target_root"
+echo "$current_root" > "$OTA_DIR/previous_root"
+echo "$target_root" > "$OTA_DIR/pending_target_root"
+echo "0" > "$OTA_DIR/bootcount"
+echo "2" > "$OTA_DIR/max_boots"
+echo "1" > "$OTA_DIR/upgrade_pending"
+
+rm -f "$UPDATE_FILE"
+
+if command -v curl >/dev/null 2>&1; then
+	curl -fsSL --retry 3 --retry-delay 2 -o "$UPDATE_FILE" "$URL"
+elif command -v wget >/dev/null 2>&1; then
+	wget -O "$UPDATE_FILE" "$URL"
+else
+	echo "OTA: need curl or wget"
+	exit 4
+fi
+
+sync
+
+if [ ! -s "$UPDATE_FILE" ]; then
+	echo "OTA: download failed"
+	exit 5
+fi
+
+if [ ! -f "$PUBKEY" ]; then
+	echo "OTA: missing SWUpdate public key at $PUBKEY"
+	exit 6
+fi
+
+echo "OTA: applying bundle via swupdate..."
+case "$target_root" in
+	/dev/mmcblk0p2) target_set="stable,rootfsA" ;;
+	/dev/mmcblk0p3) target_set="stable,rootfsB" ;;
+	*) echo "OTA: unknown target root $target_root" ; exit 7 ;;
+esac
+swupdate -i "$UPDATE_FILE" -k "$PUBKEY" -e "$target_set"
+
+echo "OTA: switching root and rebooting..."
+set_cmdline_root "$target_root"
+sync
+reboot -f
+

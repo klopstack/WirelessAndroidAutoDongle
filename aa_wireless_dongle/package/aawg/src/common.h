@@ -56,3 +56,11 @@ private:
     Logger();
     ~Logger();
 };
+
+struct BuildInfo {
+    std::string version;
+    std::string gitSha;
+    std::string buildTimeUtc;
+};
+
+BuildInfo getBuildInfo();

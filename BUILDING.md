@@ -40,3 +40,56 @@ Use one of the following defconfig for the board you intend to use:
 - `raspberrypizero2w_defconfig` - Raspberry Pi Zero 2 W
 - `raspberrypi3a_defconfig` - Raspberry Pi 3A+
 - `raspberrypi4_defconfig` - Raspberry Pi 4
+
+## OTA updates (A/B rootfs) and signing keys
+The image supports A/B root filesystem OTA updates using **SWUpdate**.
+
+### Signing keypair
+SWUpdate verifies signed update bundles using a public key embedded in the image at:
+- `aa_wireless_dongle/board/common/rootfs_overlay/etc/swupdate/public.pem` (device-side)
+
+You must generate a keypair and replace the placeholder `public.pem` with your real public key. Keep the private key in your build/CI environment.
+
+Example (RSA 3072):
+
+```shell
+# Private key (keep secret; CI/build machine)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out swupdate_signing.key
+
+# Public key (commit into the image / overlay as public.pem)
+openssl pkey -in swupdate_signing.key -pubout -out public.pem
+```
+
+Alternatively, you can use the helper script:
+
+```shell
+./scripts/ota/gen-keypair.sh keys/
+```
+
+### Triggering an OTA update
+If MQTT is enabled in `aawgd.conf`, publish a command to `<prefix>/cmd`:
+
+```text
+ota https://your-server/path/update.swu
+```
+
+The device will download the bundle to `/persist/ota/update.swu`, apply it with `swupdate`, switch the boot `root=` to the other slot, and reboot. If the new slot fails to boot/confirm within a couple of attempts it will automatically roll back.
+
+### Creating signed update bundles (.swu)
+After building an image for a board (Docker or manual), generate a signed bundle next to the produced `sdcard.img`:
+- `update.swu`
+
+From the host:
+
+```shell
+./scripts/ota/make-update-bundles.sh --board raspberrypi4 --signing-key keys/swupdate_signing.key
+```
+
+Or run the same inside the repo's Docker environment (recommended if you don't have `openssl` / `cpio` installed locally):
+
+```shell
+./scripts/ota/docker-make-update-bundles.sh --board raspberrypi4 --signing-key keys/swupdate_signing.key
+```
+
+Upload `update.swu` to your HTTP server and trigger via MQTT:
+- `ota https://host/update.swu`

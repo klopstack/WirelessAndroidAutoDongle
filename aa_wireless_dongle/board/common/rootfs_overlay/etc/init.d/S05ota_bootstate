@@ -1,0 +1,100 @@
+#!/bin/sh
+#
+# OTA A/B boot-state + rollback handling
+#
+
+set -e
+
+OTA_DIR="/persist/ota"
+CMDLINE_FILE="/boot/cmdline.txt"
+
+get_root_dev() {
+	# Extract root=... from /proc/cmdline
+	for x in $(cat /proc/cmdline); do
+		case "$x" in
+			root=*) echo "${x#root=}" ; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+remount_boot_rw() {
+	mount -o remount,rw /boot
+}
+
+remount_boot_ro() {
+	mount -o remount,ro /boot
+}
+
+set_cmdline_root() {
+	target_root="$1"
+
+	if [ ! -f "$CMDLINE_FILE" ]; then
+		echo "OTA: missing $CMDLINE_FILE"
+		return 1
+	fi
+
+	remount_boot_rw
+	# Replace root=... token while keeping rest intact
+	cur="$(cat "$CMDLINE_FILE")"
+	new=""
+	for t in $cur; do
+		case "$t" in
+			root=*) new="$new root=$target_root" ;;
+			*) new="$new $t" ;;
+		esac
+	done
+	# Trim leading space
+	new="${new# }"
+	printf "%s\n" "$new" > "$CMDLINE_FILE"
+	sync
+	remount_boot_ro
+}
+
+case "$1" in
+	start)
+		mkdir -p "$OTA_DIR"
+
+		PENDING_FILE="$OTA_DIR/upgrade_pending"
+		TARGET_FILE="$OTA_DIR/pending_target_root"
+		PREV_FILE="$OTA_DIR/previous_root"
+		BOOTCOUNT_FILE="$OTA_DIR/bootcount"
+		MAX_BOOTS_FILE="$OTA_DIR/max_boots"
+
+		[ -f "$MAX_BOOTS_FILE" ] || echo "2" > "$MAX_BOOTS_FILE"
+
+		if [ ! -f "$PENDING_FILE" ] || [ "$(cat "$PENDING_FILE")" != "1" ]; then
+			exit 0
+		fi
+
+		current_root="$(get_root_dev || true)"
+		target_root="$(cat "$TARGET_FILE" 2>/dev/null || true)"
+		previous_root="$(cat "$PREV_FILE" 2>/dev/null || true)"
+
+		# Only count boots once we've actually booted into the target slot.
+		if [ -n "$target_root" ] && [ "$current_root" = "$target_root" ]; then
+			count="$(cat "$BOOTCOUNT_FILE" 2>/dev/null || echo 0)"
+			count="$((count + 1))"
+			echo "$count" > "$BOOTCOUNT_FILE"
+
+			max="$(cat "$MAX_BOOTS_FILE" 2>/dev/null || echo 2)"
+			if [ "$count" -gt "$max" ]; then
+				echo "OTA: rollback after $count failed boot(s)"
+				if [ -n "$previous_root" ] && [ "$previous_root" != "$current_root" ]; then
+					set_cmdline_root "$previous_root"
+				fi
+				echo "0" > "$PENDING_FILE"
+				echo "0" > "$BOOTCOUNT_FILE"
+				sync
+				reboot -f
+			fi
+		fi
+
+		;;
+	*)
+		echo "Usage: $0 {start}"
+		exit 1
+esac
+
+exit 0
+

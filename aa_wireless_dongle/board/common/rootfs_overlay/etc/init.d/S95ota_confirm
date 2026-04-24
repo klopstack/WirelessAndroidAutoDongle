@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# OTA A/B confirmation (clears pending after successful boot)
+#
+
+set -e
+
+OTA_DIR="/persist/ota"
+
+get_root_dev() {
+	for x in $(cat /proc/cmdline); do
+		case "$x" in
+			root=*) echo "${x#root=}" ; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+case "$1" in
+	start)
+		PENDING_FILE="$OTA_DIR/upgrade_pending"
+		TARGET_FILE="$OTA_DIR/pending_target_root"
+		BOOTCOUNT_FILE="$OTA_DIR/bootcount"
+
+		if [ ! -f "$PENDING_FILE" ] || [ "$(cat "$PENDING_FILE")" != "1" ]; then
+			exit 0
+		fi
+
+		target_root="$(cat "$TARGET_FILE" 2>/dev/null || true)"
+		current_root="$(get_root_dev || true)"
+
+		if [ -z "$target_root" ] || [ "$current_root" != "$target_root" ]; then
+			exit 0
+		fi
+
+		# Basic health signal: aawgd is running.
+		# (You can make this stricter later: connectivity checks, etc.)
+		if ! pidof aawgd >/dev/null 2>&1; then
+			exit 0
+		fi
+
+		echo "OTA: confirming slot $current_root"
+		echo "0" > "$PENDING_FILE"
+		echo "0" > "$BOOTCOUNT_FILE"
+		echo "$current_root" > "$OTA_DIR/confirmed_root"
+		sync
+		;;
+	*)
+		echo "Usage: $0 {start}"
+		exit 1
+esac
+
+exit 0
+

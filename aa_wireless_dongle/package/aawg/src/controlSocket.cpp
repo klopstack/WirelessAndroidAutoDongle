@@ -7,8 +7,10 @@
 #include <errno.h>
 #include <string.h>
 
+#include <fstream>
 #include <sstream>
 #include <string>
+#include <sys/utsname.h>
 #include <vector>
 
 #include "bluetoothHandler.h"
@@ -57,6 +59,41 @@ static bool writeAll(int fd, const std::string& s) {
     return true;
 }
 
+static std::string readFirstLine(const std::string& path) {
+    std::ifstream f(path);
+    std::string line;
+    std::getline(f, line);
+    return line;
+}
+
+static std::string getCmdlineTokenValue(const std::string& key) {
+    const std::string cmdline = readFirstLine("/proc/cmdline");
+    std::istringstream is(cmdline);
+    std::string tok;
+    const std::string prefix = key + "=";
+    while (is >> tok) {
+        if (tok.rfind(prefix, 0) == 0) {
+            return tok.substr(prefix.size());
+        }
+    }
+    return "";
+}
+
+static double getUptimeSec() {
+    const std::string up = readFirstLine("/proc/uptime");
+    if (up.empty()) return 0.0;
+    std::istringstream is(up);
+    double sec = 0.0;
+    is >> sec;
+    return sec;
+}
+
+static std::string getKernelRelease() {
+    struct utsname u;
+    if (uname(&u) != 0) return "";
+    return std::string(u.release);
+}
+
 static std::string handleCommand(const std::string& line) {
     // Commands:
     //   LIST
@@ -65,8 +102,28 @@ static std::string handleCommand(const std::string& line) {
     // Response is single JSON object (with trailing newline).
     if (line == "LIST") {
         std::vector<BluetoothDeviceInfo> devices = BluetoothHandler::instance().listDevices();
+        const double uptimeSec = getUptimeSec();
+        const std::string rootDev = getCmdlineTokenValue("root");
+        std::string slot = "unknown";
+        if (rootDev == "/dev/mmcblk0p2") slot = "A";
+        if (rootDev == "/dev/mmcblk0p3") slot = "B";
+
+        const BuildInfo bi = getBuildInfo();
+        const std::string kernelRel = getKernelRelease();
+
         std::ostringstream os;
-        os << "{\"ok\":true,\"devices\":[";
+        os << "{"
+           << "\"ok\":true"
+           << ",\"uptimeSec\":" << uptimeSec
+           << ",\"rootDev\":\"" << jsonEscape(rootDev) << "\""
+           << ",\"slot\":\"" << jsonEscape(slot) << "\""
+           << ",\"kernelRelease\":\"" << jsonEscape(kernelRel) << "\""
+           << ",\"build\":{"
+           << "\"version\":\"" << jsonEscape(bi.version) << "\""
+           << ",\"gitSha\":\"" << jsonEscape(bi.gitSha) << "\""
+           << ",\"buildTimeUtc\":\"" << jsonEscape(bi.buildTimeUtc) << "\""
+           << "}"
+           << ",\"devices\":[";
         for (size_t i = 0; i < devices.size(); i++) {
             const auto& d = devices[i];
             if (i) os << ",";
