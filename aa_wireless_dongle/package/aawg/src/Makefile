@@ -1,4 +1,4 @@
-.PHONY: clean
+.PHONY: all clean
 .SECONDARY:
 
 EXTRA_CXXFLAGS += $(shell $(PKG_CONFIG) --cflags --libs dbus-cxx-2.0 protobuf-lite libmosquitto)
@@ -9,6 +9,8 @@ PROTO_FILES = $(wildcard proto/*.proto)
 PROTO_HEADERS = $(PROTO_FILES:proto=pb.h)
 
 ALL_HEADERS = $(wildcard *.h) $(PROTO_HEADERS)
+
+all: aawgd aawgd-mqtt
 
 aawgd: aawgd.o bluetoothHandler.o bluetoothProfiles.o bluetoothAdvertisement.o proxyHandler.o uevent.o usb.o common.o controlSocket.o proto/WifiInfoResponse.pb.o proto/WifiStartRequest.pb.o
 	$(CXX) $(CXXFLAGS) $(EXTRA_CXXFLAGS) -o '$@' $^
@@ -27,4 +29,4 @@ proto/%.pb.cc proto/%.pb.h: proto/%.proto
 	cd $(<D) && $(PROTOC) --cpp_out=. $*.proto
 
 clean:
-	-rm aawgd
+	-rm -f aawgd aawgd-mqtt *.o proto/*.pb.* proto/*.o

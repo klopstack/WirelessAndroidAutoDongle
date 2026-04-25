@@ -2,6 +2,8 @@
 #include <thread>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <cstring>
 #include <arpa/inet.h>
 
 #include "common.h"
@@ -14,6 +16,20 @@
 
 static constexpr const char* INTERFACE_BLUEZ_PROFILE = "org.bluez.Profile1";
 
+static ssize_t readFully(int fd, unsigned char *buf, size_t n) {
+    size_t got = 0;
+    while (got < n) {
+        ssize_t r = read(fd, buf + got, n - got);
+        if (r < 0) {
+            return r;
+        }
+        if (r == 0) {
+            return (ssize_t)got;
+        }
+        got += (size_t)r;
+    }
+    return (ssize_t)n;
+}
 
 #pragma region BluezProfile
 BluezProfile::BluezProfile(DBus::Path path): DBus::Object(path) {
@@ -136,31 +152,40 @@ private:
     }
 
     MessageId ReadMessage() {
-        uint16_t networkShort = 0;
+        unsigned char wire[2];
         ssize_t readBytes;
 
-        readBytes = read(m_fd, &networkShort, 2);
+        readBytes = readFully(m_fd, wire, 2);
         if (readBytes != 2) {
-            // Could not read 2 bytes. Do something.
-            Logger::instance()->info("Error reading length, read bytes: %d, errno: %s\n", readBytes, strerror(errno));
+            Logger::instance()->info("Error reading length, read bytes: %zd, errno: %s\n", readBytes, strerror(errno));
             return MessageId::Invalid;
         }
-        uint16_t length = ntohs(networkShort);
+        uint16_t lengthRaw = 0;
+        memcpy(&lengthRaw, wire, 2);
+        uint16_t length = ntohs(lengthRaw);
 
-        readBytes = read(m_fd, &networkShort, 2);
+        readBytes = readFully(m_fd, wire, 2);
         if (readBytes != 2) {
-            // Could not read 2 bytes. Do something.
-            Logger::instance()->info("Error reading message id, read bytes: %d, errno: %s\n", readBytes, strerror(errno));
+            Logger::instance()->info("Error reading message id, read bytes: %zd, errno: %s\n", readBytes, strerror(errno));
             return MessageId::Invalid;
         }
-        MessageId messageId = static_cast<MessageId>(ntohs(networkShort));
+        uint16_t idRaw = 0;
+        memcpy(&idRaw, wire, 2);
+        MessageId messageId = static_cast<MessageId>(ntohs(idRaw));
 
-        Logger::instance()->info("Read %s. length: %d, messageId: %d\n", MessageName(messageId).c_str(), length, messageId);
-        
-        unsigned char* buffer = new unsigned char[length];
-        readBytes = read(m_fd, buffer, length);
+        if (length > 0) {
+            unsigned char *buffer = new unsigned char[length];
+            readBytes = readFully(m_fd, buffer, length);
+            delete[] buffer;
+            if (readBytes != (ssize_t)length) {
+                Logger::instance()->info("Error reading message body for %s, expected %u got %zd errno: %s\n",
+                    MessageName(messageId).c_str(), (unsigned)length, readBytes, strerror(errno));
+                return MessageId::Invalid;
+            }
+        }
 
-        delete[] buffer;
+        Logger::instance()->info("Read %s. length: %u, messageId: %d\n", MessageName(messageId).c_str(),
+            (unsigned)length, static_cast<int>(messageId));
 
         return messageId;
     }
@@ -178,8 +203,20 @@ void AAWirelessProfile::NewConnection(DBus::Path path, std::shared_ptr<DBus::Fil
     Logger::instance()->info("AA Wireless NewConnection\n");
     Logger::instance()->info("Path: %s, fd: %d\n", path.c_str(), fd->descriptor());
 
-    AAWirelessLauncher(fd->descriptor()).launch();
-    Logger::instance()->info("Bluetooth launch sequence completed\n");
+    // BlueZ expects a timely D-Bus method return from NewConnection. Running the RFCOMM
+    // handshake here caused org.freedesktop.DBus.Error.NoReply (~25s) while the phone
+    // finished Wi‑Fi; use a dedicated fd copy on a worker thread.
+    int rawFd = fd->descriptor();
+    int fdCopy = dup(rawFd);
+    if (fdCopy < 0) {
+        Logger::instance()->info("AA Wireless NewConnection: dup failed: %s\n", strerror(errno));
+        return;
+    }
+    std::thread([fdCopy]() {
+        AAWirelessLauncher(fdCopy).launch();
+        close(fdCopy);
+        Logger::instance()->info("Bluetooth launch sequence completed\n");
+    }).detach();
 }
 
 void AAWirelessProfile::RequestDisconnection(DBus::Path path) {

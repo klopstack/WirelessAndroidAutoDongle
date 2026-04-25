@@ -226,7 +226,7 @@ bool BluetoothHandler::connectDeviceByObjectPath(const std::string& objectPath) 
     std::shared_ptr<DBus::PropertyProxy<bool>> deviceConnected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
 
     try {
-        if (deviceConnected && deviceConnected->get_value()) {
+        if (deviceConnected && deviceConnected->value()) {
             Logger::instance()->info("Bluetooth device already connected, disconnecting\n");
             disconnect();
         }
@@ -255,7 +255,7 @@ void BluetoothHandler::disconnectAllConnectedDevices() {
             DBus::MethodProxy disconnect = *(bluezDevice->create_method<void()>(INTERFACE_BLUEZ_DEVICE, "Disconnect"));
             std::shared_ptr<DBus::PropertyProxy<bool>> deviceConnected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
 
-            if (deviceConnected && deviceConnected->get_value()) {
+            if (deviceConnected && deviceConnected->value()) {
                 Logger::instance()->info("Disconnecting currently connected device at path: %s\n", path.c_str());
                 disconnect();
             }
@@ -289,11 +289,11 @@ std::vector<BluetoothDeviceInfo> BluetoothHandler::listDevices() {
             auto trusted = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Trusted");
             auto connected = bluezDevice->create_property<bool>(INTERFACE_BLUEZ_DEVICE, "Connected");
 
-            if (addr) info.address = addr->get_value();
-            if (name) info.name = name->get_value();
-            if (paired) info.paired = paired->get_value();
-            if (trusted) info.trusted = trusted->get_value();
-            if (connected) info.connected = connected->get_value();
+            if (addr) info.address = addr->value();
+            if (name) info.name = name->value();
+            if (paired) info.paired = paired->value();
+            if (trusted) info.trusted = trusted->value();
+            if (connected) info.connected = connected->value();
         } catch (DBus::Error& e) {
             // Skip unreadable device.
         }

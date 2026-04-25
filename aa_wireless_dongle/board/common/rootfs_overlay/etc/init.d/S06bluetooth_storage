@@ -1,26 +1,24 @@
 #!/bin/sh
 #
-# Root filesystem is read-only; bluez needs a writable /var/lib/bluetooth.
-# Bind-mount persistent storage when /persist is available, else use tmpfs.
+# Prefer persistent bluetooth state on /persist when that partition is mounted.
+# /var/lib/bluetooth is a tmpfs from fstab (before bluez) so pairing survives
+# only if we replace it with a bind mount here (S06 runs before S40bluetoothd).
 #
 
 set +e
 
 case "$1" in
 	start)
-		if mountpoint -q /var/lib/bluetooth; then
+		if ! mountpoint -q /persist 2>/dev/null; then
 			exit 0
 		fi
-		if mountpoint -q /persist; then
-			mkdir -p /persist/bluetooth
-			if mount --bind /persist/bluetooth /var/lib/bluetooth; then
-				exit 0
-			fi
-		fi
-		mount -t tmpfs -o size=8m,mode=0755 tmpfs /var/lib/bluetooth
+		mkdir -p /persist/bluetooth
+		umount /var/lib/bluetooth 2>/dev/null || true
+		mount --bind /persist/bluetooth /var/lib/bluetooth || \
+			mount -t tmpfs -o size=16m,mode=0755 tmpfs /var/lib/bluetooth
 		;;
 	stop)
-		if mountpoint -q /var/lib/bluetooth; then
+		if mountpoint -q /var/lib/bluetooth 2>/dev/null; then
 			umount /var/lib/bluetooth 2>/dev/null || true
 		fi
 		;;

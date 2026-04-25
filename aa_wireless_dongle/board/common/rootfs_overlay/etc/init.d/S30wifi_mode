@@ -14,9 +14,9 @@ case "$1" in
 
 		WIFI_MODE="${AAWG_WIFI_MODE:-sta}"
 
-		# Stop services that might keep wlan0 busy.
-		if [ -x /etc/init.d/S50dnsmasq ]; then /etc/init.d/S50dnsmasq stop || true; fi
-		if [ -x /etc/init.d/S49hostapd ]; then /etc/init.d/S49hostapd stop || true; fi
+		# Stop anything that might be holding wlan0 from a previous run.
+		# Note: dnsmasq's auto-installed S80dnsmasq is removed in post-build.sh;
+		# project-managed dnsmasq/hostapd are launched from S41wifi_services.
 		killall -q hostapd dnsmasq wpa_supplicant || true
 
 		ifdown wlan0 2>/dev/null || true
