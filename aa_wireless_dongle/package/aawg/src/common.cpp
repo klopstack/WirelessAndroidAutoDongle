@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <cstdarg>
-#include <sstream>
 #include <fstream>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -104,6 +103,7 @@ std::string Config::getUniqueSuffix() {
 WifiInfo Config::getWifiInfo() {
     const std::string detectedIp = getInterfaceIpv4Address("wlan0");
     const std::string defaultProxyIp = !detectedIp.empty() ? detectedIp : "10.0.0.1";
+
     return {
         getenv("AAWG_WIFI_SSID", "AAWirelessDongle"),
         getenv("AAWG_WIFI_PASSWORD", "ConnectAAWirelessDongle"),

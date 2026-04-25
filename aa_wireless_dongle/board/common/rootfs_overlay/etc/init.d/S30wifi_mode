@@ -39,7 +39,35 @@ EOF
 
 			# In AP mode, wpa_supplicant config is unused; leave it as-is.
 		else
-			echo "Configuring wlan0 for STA mode"
+			# In STA mode, Android Auto expects the AP's BSSID in WifiInfoResponse.
+			# We require this explicitly so the phone doesn't try to associate to a
+			# non-existent BSSID and silently fail to start the TCP session.
+			if [ -z "${AAWG_WIFI_BSSID:-}" ] || [ "${AAWG_WIFI_BSSID}" = "EDIT_THIS" ]; then
+				echo "AAWG_WIFI_BSSID must be set for STA mode; falling back to AP mode for recovery SSH"
+				WIFI_MODE="ap"
+			else
+				echo "Configuring wlan0 for STA mode"
+			fi
+		fi
+
+		if [ "$WIFI_MODE" = "ap" ]; then
+			AP_IP="${AAWG_AP_IP_ADDRESS:-10.0.0.1}"
+			AP_MASK="${AAWG_AP_NETMASK:-255.255.255.0}"
+
+			echo "Configuring wlan0 for AP mode (${AP_IP}/${AP_MASK})"
+
+			cat > /etc/network/interfaces <<EOF
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet static
+  address ${AP_IP}
+  netmask ${AP_MASK}
+EOF
+
+			# In AP mode, wpa_supplicant config is unused; leave it as-is.
+		else
 
 			# Generate wpa_supplicant.conf from aawgd.conf
 			if [ -z "${AAWG_WIFI_SSID}" ] || [ "${AAWG_WIFI_SSID}" = "EDIT_THIS" ]; then

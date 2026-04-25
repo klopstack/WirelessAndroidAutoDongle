@@ -6,8 +6,8 @@ usage() {
 usage: make-swu.sh --rootfs-image <path> --signing-key <privkey.pem> --out <update.swu>
 
 Creates a signed SWUpdate bundle (.swu) that can write the given rootfs image
-to either A/B slot. The device selects which slot to apply at install time
-via `swupdate -e stable,rootfsA` or `swupdate -e stable,rootfsB`.
+(squashfs blob) to either A/B slot. The device selects which slot to apply at
+install time via `swupdate -e stable,rootfsA` or `swupdate -e stable,rootfsB`.
 
 Signing uses a simple RSA signature:
   openssl dgst -sha256 -sign <privkey> sw-description > sw-description.sig
@@ -49,7 +49,7 @@ tmp="$(mktemp -d)"
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 
-cp -f "$rootfs_image" "$tmp/rootfs.ext4"
+cp -f "$rootfs_image" "$tmp/rootfs.squashfs"
 
 cat >"$tmp/sw-description" <<EOF
 software =
@@ -61,7 +61,7 @@ software =
         rootfsA = {
             images: (
                 {
-                    filename = "rootfs.ext4";
+                    filename = "rootfs.squashfs";
                     device = "/dev/mmcblk0p2";
                     type = "raw";
                 }
@@ -70,7 +70,7 @@ software =
         rootfsB = {
             images: (
                 {
-                    filename = "rootfs.ext4";
+                    filename = "rootfs.squashfs";
                     device = "/dev/mmcblk0p3";
                     type = "raw";
                 }
@@ -86,7 +86,7 @@ openssl dgst -sha256 -sign "$signing_key" -out "$tmp/sw-description.sig" "$tmp/s
 (
   cd "$tmp"
   : > "$out_swu"
-  printf '%s\n' "sw-description" "sw-description.sig" "rootfs.ext4" \
+  printf '%s\n' "sw-description" "sw-description.sig" "rootfs.squashfs" \
     | cpio -ov -H crc > "$out_swu"
 )
 

@@ -1,5 +1,37 @@
 #!/bin/sh
 
+# Mount writable /etc overlay before any S## script (lower = squashfs via bind).
+setup_etc_overlay() {
+	echo "Setting up /etc overlay..."
+	if ! mountpoint -q /persist 2>/dev/null; then
+		if [ -b /dev/mmcblk0p4 ] && command -v fsck.ext4 >/dev/null 2>&1; then
+			echo "Running fsck on /dev/mmcblk0p4 (/persist)..."
+			fsck.ext4 -y /dev/mmcblk0p4 </dev/null 2>/dev/null || true
+		fi
+		if [ -b /dev/mmcblk0p4 ]; then
+			mount -t ext4 -o defaults,noatime,sync,dirsync /dev/mmcblk0p4 /persist 2>/dev/null || true
+		fi
+	fi
+	if ! mountpoint -q /persist 2>/dev/null; then
+		echo "WARNING: /persist unavailable; using tmpfs (non-persistent /etc overlay)"
+		mount -t tmpfs -o size=48m,mode=0755 tmpfs /persist || true
+	fi
+	mkdir -p /persist/etc/upper /persist/etc/work /run/etc.lower
+	if ! mount --bind /etc /run/etc.lower; then
+		echo "ERROR: failed to bind /etc to /run/etc.lower"
+		return 1
+	fi
+	if ! mount -t overlay overlay -o lowerdir=/run/etc.lower,upperdir=/persist/etc/upper,workdir=/persist/etc/work /etc; then
+		echo "ERROR: failed to mount overlay on /etc"
+		umount /run/etc.lower 2>/dev/null || true
+		return 1
+	fi
+	echo "Mounted overlay on /etc (upper on /persist)"
+	return 0
+}
+
+setup_etc_overlay || true
+
 # Source aawgd configuration environment variables
 source /etc/init.d/rcS_aawgd_conf
 
@@ -24,5 +56,5 @@ for i in /etc/init.d/S??* ;do
             # No sh extension, so fork subprocess.
             $i start
             ;;
-    esac
+     esac
 done

@@ -16,7 +16,7 @@ image persist.ext4 {
 		label = "persist"
 		use-mke2fs = true
 	}
-	size = 32M
+	size = 64M
 }
 
 
@@ -32,12 +32,12 @@ image sdcard.img {
 
 	partition rootfsA {
 		partition-type = 0x83
-		image = "rootfs.ext4"
+		image = "rootfs.squashfs"
 	}
 
 	partition rootfsB {
 		partition-type = 0x83
-		image = "rootfs.ext4"
+		image = "rootfs.squashfs"
 	}
 
 	partition persist {

@@ -39,14 +39,11 @@ output_root="${output_root:-$repo_root/buildroot/output/$board}"
 images_dir="${images_dir:-$output_root/images}"
 
 rootfs_image=""
-if [[ -f "$images_dir/rootfs.ext4" ]]; then
-  rootfs_image="$images_dir/rootfs.ext4"
-elif [[ -f "$images_dir/rootfs.ext2" ]]; then
-  # Buildroot names it rootfs.ext2 even when it's ext4 format.
-  rootfs_image="$images_dir/rootfs.ext2"
+if [[ -f "$images_dir/rootfs.squashfs" ]]; then
+  rootfs_image="$images_dir/rootfs.squashfs"
 else
   echo "Could not find rootfs image in: $images_dir" >&2
-  echo "Expected rootfs.ext4 or rootfs.ext2" >&2
+  echo "Expected rootfs.squashfs (BR2_TARGET_ROOTFS_SQUASHFS)" >&2
   exit 3
 fi
 

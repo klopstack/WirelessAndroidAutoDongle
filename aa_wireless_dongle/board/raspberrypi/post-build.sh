@@ -13,4 +13,9 @@ ln -sf /boot/aawgd.conf ${TARGET_DIR}/etc/aawgd.conf
 # in STA mode.
 rm -f "${TARGET_DIR}/etc/init.d/S80dnsmasq"
 
+# We use libmosquitto for the MQTT client bridge (aawgd-mqtt) that connects to a
+# remote broker (e.g. Home Assistant). Do not start a local mosquitto broker on
+# the dongle.
+rm -f "${TARGET_DIR}/etc/init.d/S50mosquitto"
+
 source board/raspberrypi/post-build.sh

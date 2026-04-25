@@ -4,15 +4,31 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <syslog.h>
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdarg>
 #include <cstdlib>
 #include <optional>
 #include <string>
 #include <thread>
 
 static constexpr const char* CONTROL_SOCK_PATH = "/run/aawgd-control.sock";
+
+static void logInfo(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsyslog(LOG_INFO, fmt, args);
+    va_end(args);
+}
+
+static void logErr(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsyslog(LOG_ERR, fmt, args);
+    va_end(args);
+}
 
 static std::string getenvStr(const char* name, const char* def) {
     const char* v = std::getenv(name);
@@ -73,8 +89,10 @@ struct AppCtx {
 static void onConnect(struct mosquitto* m, void* obj, int rc) {
     auto* ctx = reinterpret_cast<AppCtx*>(obj);
     if (rc != 0) {
+        logErr("MQTT connect failed: rc=%d\n", rc);
         return;
     }
+    logInfo("MQTT connected, subscribing to %s\n", ctx->topicCmd.c_str());
     mosquitto_subscribe(m, nullptr, ctx->topicCmd.c_str(), 0);
 }
 
@@ -84,6 +102,7 @@ static void publishStatus(struct mosquitto* m, AppCtx& ctx) {
     if (!ok) {
         const std::string payload = "{\"ok\":false,\"error\":\"control socket unavailable\"}\n";
         mosquitto_publish(m, nullptr, ctx.topicStatus.c_str(), (int)payload.size(), payload.c_str(), 0, false);
+        logErr("MQTT publish status failed: control socket unavailable\n");
         return;
     }
 
@@ -185,6 +204,9 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
+    openlog(nullptr, LOG_PERROR | LOG_PID, LOG_USER);
+    logInfo("aawgd-mqtt starting\n");
+
     const std::string host = getenvStr("AAWG_MQTT_HOST", "");
     const int port = getenvInt("AAWG_MQTT_PORT", 1883);
     const std::string username = getenvStr("AAWG_MQTT_USERNAME", "");
@@ -195,8 +217,12 @@ int main(int argc, char** argv) {
 
     if (host.empty()) {
         // Misconfigured; nothing to do.
+        logErr("MQTT disabled/misconfigured: AAWG_MQTT_HOST is empty\n");
         return 1;
     }
+
+    logInfo("MQTT config: host=%s port=%d client_id=%s topic_prefix=%s status_interval_sec=%d\n",
+            host.c_str(), port, clientId.c_str(), topicPrefix.c_str(), interval);
 
     mosquitto_lib_init();
 
@@ -220,12 +246,16 @@ int main(int argc, char** argv) {
     mosquitto_message_callback_set(m, onMessage);
 
     const int keepalive = 30;
-    if (mosquitto_connect(m, host.c_str(), port, keepalive) != MOSQ_ERR_SUCCESS) {
+    const int connRc = mosquitto_connect(m, host.c_str(), port, keepalive);
+    if (connRc != MOSQ_ERR_SUCCESS) {
+        logErr("mosquitto_connect(%s:%d) failed: rc=%d (%s)\n",
+               host.c_str(), port, connRc, mosquitto_strerror(connRc));
         mosquitto_destroy(m);
         mosquitto_lib_cleanup();
         return 3;
     }
 
+    logInfo("MQTT connect initiated\n");
     mosquitto_loop_start(m);
 
     while (true) {

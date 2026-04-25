@@ -11,8 +11,9 @@ RETVAL=0
 case "$1" in
 	start)
 		if [ -z "$AAWG_CONF_SOURCED" ]; then
-			echo "Source /etc/aawgd.conf"
-			source /etc/aawgd.conf
+			# Ensure config variables are exported for aawgd-mqtt's getenv().
+			# rcS does this early, but allow manual starts too.
+			. /etc/init.d/rcS_aawgd_conf
 		fi
 
 		if [ -z "$AAWG_MQTT_ENABLE" ]; then
